@@ -1,6 +1,8 @@
 const figlet = require('figlet');
 const readline = require('readline');
 const SteinStore = require("stein-js-client");
+const CC = require('currency-converter-lt')
+
 const store = new SteinStore(
   "https://stein.efishery.com/v1/storages/5e1edf521073e315924ceab4"
 );
@@ -8,7 +10,8 @@ const store = new SteinStore(
 const cache = {
   last10: [],
   commodity: {},
-  priceRange: {}
+  priceRange: {},
+  area: {}
 }
 
 const scanner = readline.createInterface({
@@ -16,12 +19,24 @@ const scanner = readline.createInterface({
   output: process.stdout
 })
 
+let currentUSDToIDRValue;
+
 function printListCommand(){
   console.log('1. Print 10 latest data');
   console.log('2. Search by commodity');
   console.log('3. Search by area');
   console.log('4. Search by price range');
   console.log('5. Exit');
+}
+
+async function getIDRtoUsdValue(){
+  let currencyConverter = new CC()
+  try{
+    const result = await currencyConverter.from('USD').to('IDR').amount(1).convert()
+    return result
+  }catch(err){
+    return 1
+  }
 }
 
 async function getInput(text){
@@ -32,15 +47,30 @@ async function getInput(text){
   })
 }
 
+function convertValueToUSD(data){
+  return data.map(d => ({...d, price: '$' + (Number(d.price) / currentUSDToIDRValue).toFixed(2) }))
+}
+
 async function printBasedOnCommodity(){
   try{
-    const commodity = await getInput('Input commodity: ')
+    let commodity = await getInput('Input commodity: ')
+    commodity = commodity.toUpperCase()
+
+    if(cache.commodity[commodity]){
+      console.table(cache.commodity[commodity])
+      return
+    }
+
+
     const data = await store.read("list", {
       search: {
-        komoditas: commodity.toUpperCase()
+        komoditas: commodity
       }
     });
-    console.table(data);
+    console.table(convertValueToUSD(data));
+
+    cache.commodity[commodity] = convertValueToUSD(data)
+
   }catch(err){
     console.log('An erro when load commodity data')
   }
@@ -48,17 +78,24 @@ async function printBasedOnCommodity(){
 
 async function printLatest10Data(){
   try{
-  const data = await store.read("list");
-  let mappedData = data.filter(d => d.uuid !== null).map(d => ({ ...d, date_obj: new Date(d.tgl_parsed)}))
-  mappedData.sort((a,b) => b.date_obj.getTime() - a.date_obj.getTime())
-  mappedData = mappedData.slice(0, 10)
 
-  mappedData.forEach(d => {
-    delete d.date_obj
-  })
+    if(cache.last10.length !== 0){
+      console.table(cache.last10)
+      return
+    }
 
-  console.table(mappedData)
+    const data = await store.read("list");
+    let mappedData = data.filter(d => d.uuid !== null).map(d => ({ ...d, date_obj: new Date(d.tgl_parsed)}))
+    mappedData.sort((a,b) => b.date_obj.getTime() - a.date_obj.getTime())
+    mappedData = convertValueToUSD(mappedData.slice(0, 10))
 
+    mappedData.forEach(d => {
+      delete d.date_obj
+    })
+    
+
+    console.table(mappedData)
+    cache.last10 = mappedData
   }catch(err){
     console.log('An error when latest 10 data')
   }
@@ -67,7 +104,7 @@ async function printLatest10Data(){
 
 async function printBasedOnArea(){
   try{
-    let selectedArea = '';
+    let selectedArea = '', flag = '';
     do{
       selectedArea= await getInput('Select Area [province, city]: ')
       if(!['province', 'city'].includes(selectedArea)){
@@ -81,16 +118,29 @@ async function printBasedOnArea(){
 
     if(selectedArea === 'province'){
       searchObj.area_provinsi = search.toUpperCase()
+      flag = 'p'
     }else if(selectedArea === 'city'){
       searchObj.area_kota = search.toUpperCase()
+      flag = 'c'
+    }
+
+    const cacheValue = flag + '-' + selectedArea
+
+    if(cache.area[cacheValue]){
+      console.table(cache.area[cacheValue])
+      return;
     }
 
     const data = await store.read("list", {
       search: searchObj
     });
-    console.table(data);
+    const finalData = convertValueToUSD(data)
+    console.table(finalData);
+
+    cache.area[cacheValue] = finalData
+
   }catch(err){
-    console.log('An erro when load commodity data')
+    console.log('An error when load commodity data')
   }
 }
 
@@ -99,7 +149,7 @@ async function printByPriceRange(){
     let first, last;
 
     do{
-      first = await getInput('Please input lower limit: ');
+      first = await getInput('Please input lower limit (IDR): ');
       first = Number(first)
       if(first < 0){
         console.log('Input cannot be lower than zero')
@@ -107,7 +157,7 @@ async function printByPriceRange(){
     }while(!first || first < 0)
 
     do{
-      last = await getInput('Please input upper limit: ');
+      last = await getInput('Please input upper limit (IDR): ');
       last = Number(last)
       if(last <= first){
         console.log('Upper limit must be higner than lower limit')
@@ -117,14 +167,20 @@ async function printByPriceRange(){
     }while(!last || last < 0 || last <= first) 
 
     const data = await store.read("list");
+    const cacheValue = first + '-' + last;
+
+    if(cache.priceRange[cacheValue]){
+      console.table(cache.priceRange[cacheValue])
+      return;
+    }
 
     const mappedData = data.map(d => ({...d, price: Number(d.price) }))
     const filteredData = mappedData.filter(d => d.price >= first && d.price <= last)
     
-    console.table(filteredData)
+    console.table(convertValueToUSD(filteredData))
+    cache.priceRange[cacheValue] = convertValueToUSD(filteredData)
 
   }catch(err){
-    console.log({ err })
     console.log('Error on load ranged data')
   }
 }
@@ -133,7 +189,7 @@ async function main(){
   console.log(figlet.textSync('CLI App for Tender', {
     font: 'Doom'
     }))
-
+    currentUSDToIDRValue = await getIDRtoUsdValue()
     let selection = '', numSelection = 0;
 
     do{

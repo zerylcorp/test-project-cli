@@ -4,7 +4,7 @@
   "description": "This is for cli part",
   "main": "index.js",
   "scripts": {
-    "test": "echo \"Error: no test specified\" && exit 1"
+    "start": "node index"
   },
   "keywords": [
     "test-for-cli"
@@ -12,6 +12,7 @@
   "author": "Hitsam Tiammar",
   "license": "ISC",
   "dependencies": {
+    "currency-converter-lt": "^2.0.0-beta.0",
     "figlet": "^1.5.2",
     "stein-js-client": "^0.0.2"
   }
